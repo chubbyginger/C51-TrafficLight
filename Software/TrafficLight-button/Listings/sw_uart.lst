@@ -1,0 +1,471 @@
+C51 COMPILER V9.60.0.0   SW_UART                                                           08/09/2024 16:00:01 PAGE 1   
+
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE SW_UART
+OBJECT MODULE PLACED IN .\Objects\sw_uart.obj
+COMPILER INVOKED BY: D:\ProgFiles\Keil_v5\C51\BIN\C51.EXE sw-uart-master\sw_uart.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECT
+                    -EXTEND PRINT(.\Listings\sw_uart.lst) TABS(2) OBJECT(.\Objects\sw_uart.obj)
+
+line level    source
+
+   1          
+   2          // ----------------------------------------------------------------------- //
+   3          // /////////////////////////////////////////////////////////////////////// //
+   4          // +---------------------------------------------------------------------+ //
+   5          // |     Driver softwaroveho serioveho rozhrani (polovicni duplex)       | //
+   6          // |                     Verze 2.00 Build 071128                         | //
+   7          //                             target: 89...                             | //
+   8          #define                           C51RD2                                 | //
+   9          // |                                                                     | //
+  10          // |                       Copyright Tomas Hujer                         | //
+  11          // |                           (c) 2005-2007                             | //
+  12          // |                    thomas.hoodger(at)gmail.com                      | //
+  13          // |                                                                     | //
+  14          // |             zakladni princip vychazi z driveru v A51                | //
+  15          // |                  (c)2003-2007 Elitronic s.r.o.                      | //
+  16          // |                   by K.L.soft & Milan Slovak                        | //
+  17          // |                                                                     | //
+  18          // +---------------------------------------------------------------------+ //
+  19          // /////////////////////////////////////////////////////////////////////// //
+  20          // ----------------------------------------------------------------------- //
+  21          //                                  TODO                                   //
+  22          // ----------------------------------------------------------------------- //
+  23          //                                                                         //
+  24          //  - Nefunkcni odesilani znaku presmerovanim vystupu, zrejme bude nutne   //
+  25          //    prepracovat vysilani znaku na prime s cekanim na odeslani            //
+  26          //                                                                         //
+  27          //  - Nutno prepocitat pocty instrukci a aktualizovat hodnoty casovace     //
+  28          //    pro presnost casovani                                                //
+  29          //                                                                         //
+  30          // ----------------------------------------------------------------------- //
+  31          //                            Version history                              //
+  32          // ----------------------------------------------------------------------- //
+  33          // Release        Note                                                     //
+  34          // ----------------------------------------------------------------------- //
+  35          //  1.4         Objevena chyba, pri soucasnem pouziti driveru s driverem   //
+  36          //              pro HW232 a softwarovem echovani se pri pokusu o odeslani  //
+  37          //              vice znaku po sobe znaky zkomoli, a prestane fungovat      //
+  38          //              prijmani znaku                                             //
+  39          //                                                                         //
+  40          //  1.5         Zmena indexace, zruseni porovnavani indexu pro zapis       //
+  41          //              a cteni mezi sebou, pridany registry obsahujici pocet      //
+  42          //              znaku v bufferech chyba se zatuhnutim komunikace opravena, //
+  43          //              avsak pokud je zapsano vice znaku za sebou bez cekani,     //
+  44          //              dojde ke zkomoleni, ale vysilani funguje dal.              //
+  45          //                                                                         //
+  46          //  1.7         Osetreni nahodneho prepisu indexu prijimaciho a vysilaciho //
+  47          //              bufferu. Pri vyprazdneni bufferu jsou jeho indexy          //
+  48          //              nulovany.                                                  //
+  49          //                                                                         //
+  50          //  1.8         Prirazeni pinu presunuto do externiho souboru sw_uart.def  //
+  51          //                                                                         //
+  52          //  2.0         Prepracovano do C51, odladena funkcni verze, zjednoduseny  //
+  53          //              funkce pro ukladani znaku a priznaku ramce, pouzita        //
+  54          //              Pomocna promenna pro ulozeni vsech prichozich bitu,        //
+  55          //              vysledny znak a stavy jsou kontrolovany az po dokonceni    //
+  56          //              prijmu. Odecty instrukci od casoveho intervalu nejsou      //
+  57          //              provedeny. Casy odpovidaji rychlosti, mereno v simulatoru  //
+  58          //              Nutno overit presnost.                                     //
+  59          //                                                                         //
+  60          // ----------------------------------------------------------------------- //
+  61          // Hodnota casovace 0 se nastavuje na dobu trvani jednoho bitu.            //
+  62          //                                                                         //
+  63          // Pro 4800Bd a @11.0592MHz je to -192                                     //
+  64          // Pro 9600Bd a @18.432MHz je to -160                                      //
+  65          //                                                                         //
+  66          // Pro start prijmu se nastavuje timer0 na polovicku trvani jednoho bitu   //
+  67          // minus doba trvaní instrukci od externiho preruseni 1 do odstartovani    //
+  68          // casovace 1 a od preruseni casovace 1 do prectení rxd1                   //
+  69          // (celkem ? cyklu)                                                        //
+  70          //                                                                         //
+  71          // Pro 4800Bd a @11.0592MHz je to -66                                      //
+  72          // Pro 9600Bd a @18.432MHz je to -50                                       //
+  73          //                                                                         //
+  74          // Rutina preruseni pouziva registrovou banku 2                            //
+  75          //                                                                         //
+  76          // ----------------------------------------------------------------------- //
+  77          //                                                                         //
+  78          // ----------------------------------------------------------------------- //
+  79          #pragma LIST
+  80          #pragma PAGELENGTH(30000);
+  81          #pragma LINES
+  82          
+  83          #include "reg52.h"
+  84          #include "sw_uart.def"
+  85          #include "sw_uart.h"
+  86          
+  87          #define uchar unsigned char
+  88          
+  89          
+  90          //------------------------------------------------------------------------
+  91          // Definice konstant
+  92          //------------------------------------------------------------------------
+  93          #define  BAUD               -160             // doba jednoho bitu
+  94          #define  BIT_LEN             11              // pocet bitu
+  95          #define  SW_UART_BUF_SIZE    20              // velikost bufferu
+  96          
+  97          //------------------------------------------------------------------------
+  98          
+  99          char sw_uart_char;                 // registr prichoziho a odchozich znaku
+ 100          int  sw_uart_word;                 // registr znaku a stavovych bitu pro vysilani
+ 101          char sw_uart_bit_index;            // bitovy index
+ 102          
+ 103          char sw_uart_snd_wr;               // Index pro zapis do vysilaciho bufferu
+ 104          char sw_uart_snd_rd;               // Index pro cteni z vysilaciho bufferu
+ 105          char sw_uart_snd_in;               // Pocet byte ve vysilacim bufferu
+ 106          
+ 107          char sw_uart_rec_wr;               // Index pro zapis do prijimaciho bufferu
+ 108          char sw_uart_rec_rd;               // Index pro cteni z prijimaciho bufferu
+ 109          char sw_uart_rec_in;               // Pocet byte v prijimacim bufferu
+ 110          
+ 111          //------------------------------------------------------------------------
+ 112          
+ 113          char idata sw_uart_ribuf[SW_UART_BUF_SIZE];      // Prijimaci buffer (je plny)
+ 114          char idata sw_uart_tibuf[SW_UART_BUF_SIZE];      // Vysilaci buffer (je prazdny)
+ 115          
+ 116          //------------------------------------------------------------------------
+ 117          
+ 118          bit sw_uart_tx_flag;                             // priznak vysilani
+ 119          bit sw_uart_rx_flag;                             // priznak prijmu
+ 120          bit sw_uart_rec_error;                           // chyba prijmu
+ 121          bit sw_uart_rec_9bit;                            // devaty bit prijimace
+ 122          bit sw_uart_snd_9bit;                            // deváty bit vysilace
+ 123          bit sw_uart_tx_ready;                            // znak odeslan
+ 124          //bit sw_uart_rx_ready;                            // znak prijat
+ 125          bit sw_uart_rec_full;                            // prijimaci buffer je plny
+ 126          
+ 127          bit sw_uart_rec_ribuf;                           // Flag znaku v prijimacim bufferu
+ 128          bit sw_uart_snd_ribuf;                           // Flag znaku ve vysilacim bufferu
+ 129          
+ 130          //------------------------------------------------------------------------
+ 131          
+ 132          
+ 133          
+ 134          // +------------------------------------------------------------------------+
+ 135          // |                Externi preruseni - zacatek serioveho prijmu            |
+ 136          // +------------------------------------------------------------------------+
+ 137          // | Pri externim preruseni je zahajen prijem znaku,                        |
+ 138          // | externi preruseni je az do dalsiho znaku zakazano,                     |
+ 139          // | je povolen timer0 a dalsi zpracovani prichoziho znaku                  |
+ 140          // | je pri preruseni casovace.                                             |
+ 141          // |                                                                        |
+ 142          // | Pro dodrzeni presnosti je potreba odecist pocet instrukci od doby      |
+ 143          // | vyvolani preruseni timeru1 a precteni RXD1                             |
+ 144          // |                                                                        |
+ 145          // | Verze 2.0:                                                             |
+ 146          // |    sw_uart_rx():   22 instrukci                                        |
+ 147          // |    sw_uart_rxtx()  26 instrukci                                        |
+ 148          // |    sw_uart_rxbit() 25 instrukci                                        |
+ 149          // +------------------------------------------------------------------------+
+ 150          #pragma NOAREGS
+ 151          //void sw_uart_rx() interrupt 0x13 using 2
+ 152          void sw_uart_rx() interrupt 2 using 2
+ 153          {
+ 154   1          EX1 = 0;                           // zakaz externiho preruseni
+ 155   1          TL0 = (BAUD / 2);                  // první doba je polovicni, druha a dalsí doby jsou cele
+ 156   1          TH0 = BAUD;                        // hodnota pro reload timeru
+ 157   1          TR0 = 1;                           // start casovace 0
+ 158   1      
+ 159   1          sw_uart_bit_index = BIT_LEN-1;     // nastav pocet bitu
+ 160   1          sw_uart_char = 0;                  // inicializace prijimaciho registru
+ 161   1          sw_uart_word = 0;                  // inicializace prijimaciho registru
+ 162   1          sw_uart_rec_error = 0;             // nulovani príznaku chyby
+ 163   1          sw_uart_rx_flag = 1;               // nastavení príznaku príjmu
+ 164   1      }
+ 165          #pragma AREGS
+ 166          
+ 167          
+ 168          
+ 169          // +------------------------------------------------------------------------+
+ 170          // |          PRERUSENI CASOVACE 0 - PRIJEM NEBO VYSILANI BITU              |
+ 171          // +------------------------------------------------------------------------+
+ 172          // | Pri preruseni casovace je cten stav vstupu RXD1 nebo zapisovan stav    |
+ 173          // | vystupu TXD1. Po dokonceni odesilani je preruseni zakazano             |
+ 174          // |                                                                        |
+ 175          // | Timer0 bezi v modu 8bit-reload, tzn. ze pri naplneni je hodnota  TL0   |
+ 176          // | prepsana hodnotou TH0                                                  |
+ 177          // +------------------------------------------------------------------------+
+ 178          #pragma NOAREGS
+ 179          void sw_uart_rxtx() interrupt 1 using 2   // vector 0x0B
+ 180          {
+ 181   1          if(sw_uart_rx_flag)                   // je-li pøíjem
+ 182   1              sw_uart_rxbit();                  // zavolej rutinu pro prijem
+ 183   1          else
+ 184   1              if(sw_uart_tx_flag)                   // je-li vysílání
+ 185   1                  sw_uart_txbit();                  // zavolej rutinu pro vysilani
+ 186   1              else
+ 187   1              {
+ 188   2                IT1 = 0;                              // nulování pøípadného požadavku ext. pøerušení 1
+ 189   2                  EX1 = 1;                              // povolení INT1
+ 190   2                  TR0 = 0;                              // zastavení èasovaèe 0
+ 191   2              }
+ 192   1      }
+ 193          #pragma AREGS
+ 194          
+ 195          // +-----------------------------------------------------------------------+
+ 196          // |                       Sekvencni prijem byte                           |
+ 197          // +-----------------------------------------------------------------------+
+ 198          // | Volano z preruseni timer0, prijimany bit urcuje hodnota               |
+ 199          // | sw_uart_bit_index.                                                    |
+ 200          // +-----------------------------------------------------------------------+
+ 201          void sw_uart_rxbit() using 2
+ 202          {
+ 203   1          // +---------------------------------------------------+
+ 204   1          // |   1   x   | x    x   x   x   x   x   x      0     |
+ 205   1          // |   D9  D7  | D6   D5  D4  D3  D2  D1  D0  Startbit |
+ 206   1          // |   512 256 | 128  64  32  16  8   4   2      1     |
+ 207   1          // |   9   8   | 7    6   5   4   3   2   1      0     |
+ 208   1          // +---------------------------------------------------+
+ 209   1      
+ 210   1          if(sw_uart_bit_index)
+ 211   1          {
+ 212   2              sw_uart_word |= ((RXD1?1:0) << 10);           // nacti bit do registru
+ 213   2              sw_uart_word >>= 1;                           // rotuj znak vpravo
+ 214   2      
+ 215   2              sw_uart_bit_index--;                          // pokracuj dokud neni registr naplnen
+ 216   2          }
+ 217   1          else
+ 218   1          {
+ 219   2              IT1 = 0;                                      // nulování pripadneho pozadavku EXT1
+ 220   2              EX1 = 1;                                      // povoleni INT1
+ 221   2              TR0 = 0;                                      // zastav timer0
+ 222   2      
+ 223   2              if(sw_uart_word & 1)                          // zkontroluj startbit
+ 224   2                  sw_uart_rec_error = 1;                    // pripadne nastav chybu
+ 225   2      
+ 226   2              if(~RXD1)                                     // zkontroluj stopbit
+ 227   2                  sw_uart_rec_error = 1;                    // pripadne nastav chybu
+ 228   2      
+ 229   2              sw_uart_char = (char) (sw_uart_word >> 1);    // vyseparuj datovy byte
+ 230   2              sw_uart_snd_9bit = (sw_uart_word & 512)?1:0;  // 9ty bit
+ 231   2              sw_uart_rx_flag = 0;                          // Shod priznak prijmu
+ 232   2      
+ 233   2              //if(~sw_uart_rec_error)                        // pokud nebyla chyba pri prijmu
+ 234   2                  if(sw_uart_rec_in < SW_UART_BUF_SIZE)              // Zjisti zda je misto v prijimacim bufferu
+ 235   2                  {
+ 236   3                      sw_uart_rec_wr %= SW_UART_BUF_SIZE;            // Rotuj index pro zapis do prijimaciho buf
+             -feru
+ 237   3                      sw_uart_ribuf[sw_uart_rec_wr] = sw_uart_char;  // zapis znak do prijimaciho bufferu
+ 238   3                      sw_uart_rec_in++;                              // Pripocitej prvek v prijimacim bufferu
+ 239   3                      sw_uart_rec_wr++;                              // Posun index pro zapis do prijimaciho buf
+             -feru
+ 240   3                      sw_uart_rec_ribuf = 1;                         // Nastav flag znaku v prijimacim bufferu
+ 241   3                  }
+ 242   2                  else
+ 243   2                  {
+ 244   3                      sw_uart_rec_full = 1;                          // Nastav priznak preplneneho bufferu
+ 245   3                  }
+ 246   2          }
+ 247   1      }
+ 248          
+ 249          // +-----------------------------------------------------------------------+
+ 250          // |                       Sekvencni odesilani byte                        |
+ 251          // +-----------------------------------------------------------------------+
+ 252          // | Volano z preruseni timer0, odesilany bit urcuje hodnota               |
+ 253          // | sw_uart_bit_index. Pri zahajeni odesilani startbitu deaktivuje        |
+ 254          // | externi preruseni EXT1 a spusti timer0.                               |
+ 255          // | Po odeslani celeho byte vypina preruseni timer0                       |
+ 256          // | a aktivuje EXT1.                                                      |
+ 257          // +-----------------------------------------------------------------------+
+ 258          void sw_uart_txbit() using 2
+ 259          {
+ 260   1          if(sw_uart_bit_index)
+ 261   1          {
+ 262   2              TXD1 = (bit) (sw_uart_word & 1);        // zapis 0ty bit na vystup
+ 263   2              sw_uart_word >>= 1;                     // rotuj znak vpravo
+ 264   2              sw_uart_bit_index--;
+ 265   2          }
+ 266   1          else
+ 267   1          {
+ 268   2              sw_uart_tx_flag = 0;                    // Shod priznak vysilani
+ 269   2              sw_uart_tx_ready = 1;                   // Nastav priznak vyslaneho bajtu
+ 270   2          }
+ 271   1      }
+ 272          
+ 273          
+ 274          // +-----------------------------------------------+
+ 275          // |    Nulovani indexu prijimaciho bufferu        |
+ 276          // +-----------------------------------------------+
+ 277          void sw_uart_reset_rec_ix()
+ 278          {
+ 279   1          sw_uart_rec_wr = 0;        // Nuluj index pro zapis do prijimaciho bufferu
+ 280   1          sw_uart_rec_rd = 0;        // Nuluj index pro cteni z prijimaciho bufferu
+ 281   1      }
+ 282          
+ 283          
+ 284          // +-----------------------------------------------+
+ 285          // |     Nulovani indexu vysilaciho bufferu        |
+ 286          // +-----------------------------------------------+
+ 287          void sw_uart_reset_snd_ix()
+ 288          {
+ 289   1          sw_uart_snd_wr = 0;         // Nuluj index pro zapis do vysilaciho bufferu
+ 290   1          sw_uart_snd_rd = 0;         // Nuluj index pro cteni z vysilaciho bufferu
+ 291   1      }
+ 292          
+ 293          
+ 294          // +------------------------------------------------------------------------+
+ 295          // |                Nacteni znaku z prijimaciho bufferu                     |
+ 296          // +------------------------------------------------------------------------+
+ 297          // | Vyzvedne z prijimaciho bufferu znak. pokud je buffer prazdny, vraci 0  |
+ 298          // +------------------------------------------------------------------------+
+ 299          char sw_uart_getchar()
+ 300          {
+ 301   1              uchar out=0;
+ 302   1      
+ 303   1              if(sw_uart_rec_in)
+ 304   1              {
+ 305   2                  sw_uart_rec_rd %= SW_UART_BUF_SIZE;     // pretoc index pro cteni
+ 306   2                  out = sw_uart_ribuf[sw_uart_rec_rd];    // nacti znak
+ 307   2      
+ 308   2                  sw_uart_rec_in--;                       // Sniz pocet prvku v prijimacim bufferu
+ 309   2                  sw_uart_rec_rd++;                       // Inkrementuj index pro cteni z prijimaciho bufferu
+ 310   2          
+ 311   2                  // Srovnani indexu pri vyprazdneni bufferu
+ 312   2                  if(!sw_uart_rec_in)
+ 313   2                  {
+ 314   3                      sw_uart_rec_ribuf = 0;              // Nuluj flag znaku v prijimacim bufferu
+ 315   3                      sw_uart_reset_rec_ix();             // Skok na rutinu nulovani indexu pri prijimacim buffe
+             -ru
+ 316   3                  }
+ 317   2              }
+ 318   1              return(out);
+ 319   1      }
+ 320          
+ 321          
+ 322          
+ 323          // +------------------------------------------------------------------------+
+ 324          // |                 Vysilani znaku ve vysilacim bufferu                    |
+ 325          // +------------------------------------------------------------------------+
+ 326          // | Priprava znaku z vysilaciho bufferu na vysilani, ceka na dokonceni     |
+ 327          // | prijmu, inituje odesilani po dokonceni predchoziho                     |
+ 328          // +------------------------------------------------------------------------+
+ 329          void sw_uart_proc()
+ 330          {
+ 331   1          if(~sw_uart_rx_flag)                                         // pokud neprobiha prijem znaku
+ 332   1          {
+ 333   2              if(sw_uart_snd_in)
+ 334   2              {
+ 335   3                  if(sw_uart_tx_ready)                                 // pokud dokonceni odesilani znaku
+ 336   3                  {
+ 337   4                      EX1 = 0;                                         // Zakazani externiho preruseni 1
+ 338   4                      DIR1 = 0;                                        // Nastavení smeru toku dat na vysilani
+ 339   4          
+ 340   4                      sw_uart_snd_rd %= SW_UART_BUF_SIZE;              // Rotuj index pro cteni z vysilaciho buf
+             -feru
+ 341   4                      sw_uart_char = sw_uart_tibuf[sw_uart_snd_rd];    // Zapis znak do vysilaciho byte
+ 342   4      
+ 343   4                      sw_uart_snd_9bit = 1;                            // 9. bit nastav na 1 jako 2.stop bit
+ 344   4                      sw_uart_tx_ready = 0;                            // Nulovani priznaku dokonceni vysilani
+ 345   4      
+ 346   4                      sw_uart_bit_index = BIT_LEN;                     // Nastav pocitadla bitu
+ 347   4      
+ 348   4                      sw_uart_tx_flag = 1;                             // Nastaveni priznaku vysilani
+ 349   4      
+ 350   4                      sw_uart_word = (sw_uart_char << 1) ;             // zapis datovy byte do registru
+ 351   4                      sw_uart_word &= ~1;                              // zapis startbit do registru (0)
+ 352   4                      sw_uart_word |= (1 << 9);                        // zapis 9.bit do registru (1)
+ 353   4                      sw_uart_word |= (1 << 10);                       // zapis stopbit do registru (1)
+ 354   4                      
+ 355   4                      // +----------------------------------------------------------+
+ 356   4                      // |     1    1   x   | x    x   x   x   x   x   x      0     |
+ 357   4                      // |  Stopbit D9  D7  | D6   D5  D4  D3  D2  D1  D0  Startbit |
+ 358   4                      // |   1024   512 256 | 128  64  32  16  8   4   2      1     |
+ 359   4                      // |    10    9   8   | 7    6   5   4   3   2   1      0     |
+ 360   4                      // +----------------------------------------------------------+
+ 361   4      
+ 362   4      
+ 363   4                      TL0 = BAUD;                                      // Nastavení doby do nastaveni startbitu 
+             -na TXD1
+ 364   4                      TH0 = BAUD;                                      // Nastaveni doby startbitu na TXD1
+ 365   4                      TR0 = 1;                                         // Spust timer0
+ 366   4      
+ 367   4                      sw_uart_snd_in--;                                // Sniz pocet byte ve vysilacim bufferu
+ 368   4                      sw_uart_snd_rd++;                                // Zvys index vysilaciho bufferu pro cten
+             -i
+ 369   4          
+ 370   4                      // Srovnani indexu pri vyprazdneni bufferu
+ 371   4                      if(!sw_uart_snd_in)                              // pokud je buffer prazdny
+ 372   4                      {
+ 373   5                          sw_uart_snd_ribuf = 0;                       // Nuluj flag znaku ve vysilacim bufferu
+ 374   5                          sw_uart_reset_snd_ix();                      // Zavolej rutinu nulovani indexu vysilac
+             -iho bufferu
+ 375   5                      }
+ 376   4                  }
+ 377   3              }
+ 378   2              else
+ 379   2              {
+ 380   3                  if(sw_uart_tx_ready)                                 // pokud je vysilani ukonceno
+ 381   3                  {
+ 382   4                      DIR1 = 1;                                        // nastav smer toku dat na prijem
+ 383   4                  }
+ 384   3              }
+ 385   2          }
+ 386   1      }
+ 387          
+ 388          
+ 389          // +------------------------------------------------------------------------+
+ 390          // |                             Init promennych                            |
+ 391          // +------------------------------------------------------------------------+
+ 392          void sw_uart_init()
+ 393          {
+ 394   1              sw_uart_snd_wr = 0;          // Nuluj index ve vysilacim bufferu pro zapis
+ 395   1              sw_uart_snd_rd = 0;          // Nuluj index ve vysilacim bufferu pro cteni
+ 396   1              sw_uart_snd_in = 0;          // Nuluj pocet prvku ve vysilacim bufferu
+ 397   1      
+ 398   1              sw_uart_rec_wr = 0;          // Nuluj index v prijimacim bufferu pro zapis
+ 399   1              sw_uart_rec_rd = 0;          // Nuluj index v prijimacim bufferu pro cteni
+ 400   1              sw_uart_rec_in = 0;          // Nuluj pocet prvku v prijimacim bufferu
+ 401   1      
+ 402   1              sw_uart_tx_flag = 0;         // Nulování pøíznakù
+ 403   1              sw_uart_rx_flag = 0;         // Nuluj flag prijmani
+ 404   1              sw_uart_rec_error = 0;       
+ 405   1      
+ 406   1              RXD1 = 1;                    // RXD1 jako vstup
+ 407   1              TXD1 = 1;                    // TXD1 do neaktivního stavu
+ 408   1              DIR1 = 1;                    // Nastavení smìru toku dat na pøíjem
+ 409   1      
+ 410   1              sw_uart_tx_ready = 1;        // Nastav priznak vysilani pripraveno
+ 411   1      
+ 412   1              TMOD &= 0xF0;                // Nastaveni modu casovace 0
+ 413   1              TMOD |= 2;                   // GATE0 = 0, C_T0 = 0, M01 = 1, M00 = 0 
+ 414   1                  
+ 415   1              TR0 = 0;                     // zastav citac 0
+ 416   1              ET0 = 1;                     // ? povolení preruseni casovace 0
+ 417   1              PT0 = 1;                     // priorita pro casovac 0
+ 418   1              PX1 = 1;                     // priorita pro externi int1
+ 419   1              IPH = 6;                     // horni priorita pro CT0 a EXT. INT1
+*** ERROR C202 IN LINE 419 OF sw-uart-master\sw_uart.c: 'IPH': undefined identifier
+ 420   1              IT1 = 0;                     // externí preruseni 1 spousteno urovni L (1 = sestupnou hranou)
+ 421   1              IE1 = 0;                     // nulování prípadneho pozadavku ext. preruseni 1
+ 422   1              EX1 = 1;                     // povolení externího preruseni 1
+ 423   1      }
+ 424          
+ 425          // +------------------------------------------------------------------------+
+ 426          // |                 Vlozeni znaku do vysilaciho bufferu                    |
+ 427          // +------------------------------------------------------------------------+
+ 428          // | Pri uspechu vraci 1                                                    |
+ 429          // +------------------------------------------------------------------------+
+ 430          char sw_uart(char ch)
+ 431          {
+ 432   1          // Zjisti zda je v bufferu misto
+ 433   1          if(sw_uart_snd_in < SW_UART_BUF_SIZE)
+ 434   1          {
+ 435   2              sw_uart_snd_wr %= SW_UART_BUF_SIZE;   // Rotuj index pro zapis
+ 436   2              sw_uart_tibuf[sw_uart_snd_wr] = ch;   // zapis znak do bufferu
+ 437   2              sw_uart_snd_in++;                     // Inkrementuj pocet prvku ve vysilacim bufferu
+ 438   2              sw_uart_snd_wr++;                     // Inkrementuj index ve vysilacim bufferu
+ 439   2              sw_uart_snd_ribuf = 1;                // Nastav flag znaku ve vysilacim bufferu
+ 440   2      
+ 441   2              return(1);
+ 442   2          }
+ 443   1          return(0);
+ 444   1      }
+ 445          
+ 446          
+ 447          
+ 448          
+ 449          
+ 450          
+ 451          
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  1 ERROR(S)

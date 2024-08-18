@@ -1,0 +1,50 @@
+C51 COMPILER V9.60.0.0   HWINIT                                                            08/14/2024 13:34:17 PAGE 1   
+
+
+C51 COMPILER V9.60.0.0, COMPILATION OF MODULE HWINIT
+OBJECT MODULE PLACED IN .\Objects\hwinit.obj
+COMPILER INVOKED BY: D:\ProgFiles\Keil_v5\C51\BIN\C51.EXE hwinit.c OPTIMIZE(8,SPEED) BROWSE DEBUG OBJECTEXTEND PRINT(.\L
+                    -istings\hwinit.lst) TABS(2) OBJECT(.\Objects\hwinit.obj)
+
+line level    source
+
+   1          #include <reg51.h>
+   2          #include "main.h"
+   3          
+   4          void DisplayInit() {
+   5   1        DCLK = 1;
+   6   1        Display0 = 1;
+   7   1        Display1 = 1;
+   8   1        Display2 = 1;
+   9   1        Display3 = 1;
+  10   1        DCLK = 0;
+  11   1        LED1_R = 0;
+  12   1        LED1_Y = 0;
+  13   1        LED1_G = 1;
+  14   1        LED2_R = 1;
+  15   1        LED2_Y = 0;
+  16   1        LED2_G = 0;
+  17   1      }
+  18          
+  19          void Timer0Init() {
+  20   1        TMOD |= 0x01;   
+  21   1        TH0 = (65536 - 50*1000)/256;
+  22   1        TL0 = (65536 - 50*1000)%256;
+  23   1        EA = 1;
+  24   1        ET0 = 1;
+  25   1        TR0 = 0;
+  26   1      }
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =     41    ----
+   CONSTANT SIZE    =   ----    ----
+   XDATA SIZE       =   ----    ----
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =   ----    ----
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =   ----    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
