@@ -66,7 +66,6 @@ void Timer0_ISR() interrupt 1 using 1 {
 			switch (state) {
 				case 1:
 					SendString("Switching to state 2\r\n");
-					clearScreen();
 					state = 2;
 					Tcnt = 3;
 					TR0 = 1;
@@ -154,6 +153,7 @@ void main() {
 			LED2_R = 1;
 			LED2_Y = 0;
 			LED2_G = 0;
+			clearScreen();
 		}
 		else if (state == 3)
 		{
@@ -163,6 +163,7 @@ void main() {
 			LED2_R = 1;
 			LED2_Y = 0;
 			LED2_G = 0;
+			clearScreen();
 		}
 		else if (state == 4)
 		{
@@ -196,6 +197,7 @@ void main() {
 			LED2_R = 1;
 			LED2_Y = 0;
 			LED2_G = 0;
+			clearScreen();
 		}
 		else
 		{
@@ -205,6 +207,7 @@ void main() {
 			LED2_R = 1;
 			LED2_Y = 0;
 			LED2_G = 0;
+			clearScreen();
 		}
 		Delay1ms(10);
 	}

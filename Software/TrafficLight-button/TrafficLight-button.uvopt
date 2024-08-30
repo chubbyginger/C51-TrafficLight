@@ -162,6 +162,11 @@
           <WinNumber>1</WinNumber>
           <ItemText>Tcnt</ItemText>
         </Ww>
+        <Ww>
+          <count>4</count>
+          <WinNumber>1</WinNumber>
+          <ItemText>Icnt</ItemText>
+        </Ww>
       </WatchWindow1>
       <Tracepoint>
         <THDelay>0</THDelay>
