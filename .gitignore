@@ -2,3 +2,4 @@ Software/TrafficLight-button/Objects
 *.workspace
 *.uvgui*
 *.pdsbak
+release/
